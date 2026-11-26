@@ -1,11 +1,33 @@
 import { useEffect, useState } from 'react';
-import { fetchFontBuildJob, startFontBuild } from '../api/client';
-import type { FontBuildJobResponse } from '../types';
+import { fetchFontBuildJob, fetchGlyphPreviews, startFontBuild } from '../api/client';
+import type { FontBuildJobResponse, GlyphPreviewResponse } from '../types';
 
 interface BuildStepProps {
   sessionToken: string;
   onBuildSuccess: (job: FontBuildJobResponse) => void;
   onPrev: () => void;
+}
+
+const PREVIEW_EM_PX = 68;
+const SLOT_HEIGHT_PX = Math.round(PREVIEW_EM_PX * 1.45);
+const BASELINE_Y_PX = Math.round(PREVIEW_EM_PX * 1.05);
+
+function pickDefaultPreviewText(glyphKeys: string[]): string {
+  const keySet = new Set(glyphKeys);
+  const candidates = [
+    'Hello World 123',
+    '가나다라 마바사',
+    'The quick brown fox',
+    'ABCDEFG abcdefg 0123',
+  ];
+  for (const sample of candidates) {
+    const nonSpace = [...sample].filter((ch) => ch !== ' ');
+    const matched = nonSpace.filter((ch) => keySet.has(ch)).length;
+    if (matched >= Math.min(4, nonSpace.length)) {
+      return sample;
+    }
+  }
+  return glyphKeys.slice(0, 16).join('') || 'Hello World 123';
 }
 
 export function BuildStep({ sessionToken, onBuildSuccess, onPrev }: BuildStepProps) {
@@ -15,9 +37,42 @@ export function BuildStep({ sessionToken, onBuildSuccess, onPrev }: BuildStepPro
   const [scaleFactor, setScaleFactor] = useState<number>(1.0);
   const [agreedTerms, setAgreedTerms] = useState<boolean>(false);
 
+  const [previewData, setPreviewData] = useState<GlyphPreviewResponse | null>(null);
+  const [previewLoading, setPreviewLoading] = useState<boolean>(true);
+  const [previewText, setPreviewText] = useState<string>('Hello World 123');
+  const [showBaseline, setShowBaseline] = useState<boolean>(true);
+
   const [job, setJob] = useState<FontBuildJobResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState<boolean>(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setPreviewLoading(true);
+    fetchGlyphPreviews(sessionToken)
+      .then((data) => {
+        if (cancelled) return;
+        setPreviewData(data);
+        const keys = Object.keys(data.glyphs);
+        if (keys.length > 0) {
+          setPreviewText(pickDefaultPreviewText(keys));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPreviewData(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setPreviewLoading(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionToken]);
 
   useEffect(() => {
     if (!job || job.status === 'completed' || job.status === 'failed') {
@@ -123,6 +178,124 @@ export function BuildStep({ sessionToken, onBuildSuccess, onPrev }: BuildStepPro
             disabled={isBuilding}
           />
         </label>
+      </div>
+
+      <div className="live-preview-box">
+        <div className="live-preview-header">
+          <div>
+            <strong>실시간 자간·크기 미리보기</strong>
+            <span className="muted" style={{ marginLeft: 8, fontSize: '0.84rem' }}>
+              슬라이더를 움직이면 업로드한 내 손글씨로 바로 반영돼요
+            </span>
+          </div>
+          <div className="row-actions">
+            <label className="checkbox-row" style={{ margin: 0, fontSize: '0.84rem' }}>
+              <input
+                type="checkbox"
+                checked={showBaseline}
+                onChange={(e) => setShowBaseline(e.target.checked)}
+              />
+              <span>베이스라인</span>
+            </label>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => {
+                setLetterSpacing(0);
+                setScaleFactor(1.0);
+              }}
+              disabled={isBuilding || (letterSpacing === 0 && scaleFactor === 1.0)}
+            >
+              기본값 복원
+            </button>
+          </div>
+        </div>
+
+        <input
+          type="text"
+          className="live-preview-input"
+          value={previewText}
+          onChange={(e) => setPreviewText(e.target.value)}
+          placeholder="미리볼 문장을 입력해 보세요 (예: Hello World 123)"
+        />
+
+        <div className="live-preview-stage" aria-label="손글씨 자간·크기 실시간 미리보기">
+          {previewLoading ? (
+            <p className="muted" style={{ margin: '24px 0' }}>
+              업로드한 손글씨 미리보기를 준비하는 중...
+            </p>
+          ) : !previewData || Object.keys(previewData.glyphs).length === 0 ? (
+            <p className="muted" style={{ margin: '24px 0' }}>
+              미리볼 수 있는 글자가 아직 없습니다. 이전 단계에서 템플릿 PNG를 업로드해 주세요.
+            </p>
+          ) : (
+            <div className="live-preview-line" style={{ minHeight: SLOT_HEIGHT_PX }}>
+              {showBaseline && (
+                <div className="live-preview-baseline" style={{ top: BASELINE_Y_PX }} />
+              )}
+              {[...previewText].map((ch, idx) => {
+                const pxPerEm = PREVIEW_EM_PX / previewData.units_per_em;
+                if (ch === ' ') {
+                  const spaceW = Math.max(180, 320 + letterSpacing) * pxPerEm;
+                  return (
+                    <span
+                      key={`sp-${idx}`}
+                      className="live-glyph-slot"
+                      style={{ width: spaceW, height: SLOT_HEIGHT_PX }}
+                    />
+                  );
+                }
+
+                const item = previewData.glyphs[ch];
+                if (!item) {
+                  return (
+                    <span
+                      key={`miss-${idx}`}
+                      className="live-glyph-missing"
+                      title="업로드된 템플릿에 없는 글자"
+                    >
+                      {ch}
+                    </span>
+                  );
+                }
+
+                const halfDelta = Math.trunc(letterSpacing / 2);
+                const lsb = Math.max(10, previewData.default_side_bearing + halfDelta);
+                const rsb = Math.max(
+                  10,
+                  previewData.default_side_bearing + letterSpacing - halfDelta,
+                );
+                const glyphW = Math.max(1, item.width_em * scaleFactor);
+                const glyphH = Math.max(1, item.height_em * scaleFactor);
+                const advanceW = Math.max(120, glyphW + lsb + rsb);
+
+                return (
+                  <span
+                    key={`g-${idx}`}
+                    className="live-glyph-slot"
+                    style={{
+                      width: advanceW * pxPerEm,
+                      height: SLOT_HEIGHT_PX,
+                    }}
+                  >
+                    <img
+                      src={item.data_url}
+                      alt={ch}
+                      draggable={false}
+                      className="live-glyph-img"
+                      style={{
+                        left: lsb * pxPerEm,
+                        top: BASELINE_Y_PX - item.ascent_em * scaleFactor * pxPerEm,
+                        width: glyphW * pxPerEm,
+                        height: glyphH * pxPerEm,
+                      }}
+                    />
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="policy-box">

@@ -2,14 +2,23 @@
 
 from __future__ import annotations
 
+import base64
+import io
 import json
+from dataclasses import replace
 from typing import Literal
 
+import numpy as np
 from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from fastapi.responses import FileResponse
+from PIL import Image
 
 from app.core.config import settings
+from app.core.template_spec import DEFAULT_TEMPLATE_SPEC
+from app.core.validation_config import DEFAULT_VALIDATION_THRESHOLDS
 from app.schemas.font_build import FontBuildJobResponse, FontBuildRequest
+from app.services.cell_splitter import split_page_into_cells
+from app.services.glyph_normalizer import DEFAULT_SIDE_BEARING, UNITS_PER_EM
 from app.services.session_store import get_session
 from app.workers.build_jobs import create_build_job, get_build_job, run_font_build_job
 
@@ -96,6 +105,86 @@ def _resolve_artifact_path(session_token: str, fmt: Literal["ttf", "woff2", "zip
             detail="요청한 폰트 파일을 찾을 수 없습니다.",
         )
     return str(file_path), filename
+
+
+@router.get("/{session_token}/glyph-previews")
+def get_glyph_previews(session_token: str) -> dict[str, object]:
+    """자간·크기 실시간 미리보기용 글리프 썸네일과 치수를 반환합니다."""
+    try:
+        session = get_session(session_token)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="세션을 찾을 수 없거나 만료되었습니다.",
+        )
+
+    uploads_dir = settings.storage_dir / "sessions" / session_token / "uploads"
+    spec = replace(DEFAULT_TEMPLATE_SPEC, version=session.template_version)
+    threshold = DEFAULT_VALIDATION_THRESHOLDS.alpha_foreground_threshold
+
+    glyph_previews: dict[str, dict[str, object]] = {}
+    if uploads_dir.is_dir():
+        for page_file in sorted(uploads_dir.glob("page_*.png")):
+            stem_parts = page_file.stem.split("_")
+            if len(stem_parts) != 2 or not stem_parts[1].isdigit():
+                continue
+            page_num = int(stem_parts[1])
+            try:
+                cells = split_page_into_cells(
+                    image_path=page_file,
+                    preset_id=session.preset_id,
+                    page_number=page_num,
+                    spec=spec,
+                )
+            except ValueError:
+                continue
+
+            for cell in cells:
+                if cell.is_empty:
+                    continue
+                ys, xs = np.where(cell.alpha >= threshold)
+                if len(xs) == 0 or len(ys) == 0:
+                    continue
+
+                x0, x1 = int(xs.min()), int(xs.max())
+                y0, y1 = int(ys.min()), int(ys.max())
+                cell_h = float(cell.alpha.shape[0])
+                baseline_px = cell_h * spec.baseline_ratio
+                em_per_px = UNITS_PER_EM / cell_h
+
+                crop_alpha = cell.alpha[y0 : y1 + 1, x0 : x1 + 1]
+                ch, cw = crop_alpha.shape
+                rgba = np.zeros((ch, cw, 4), dtype=np.uint8)
+                rgba[:, :, 0] = 30
+                rgba[:, :, 1] = 41
+                rgba[:, :, 2] = 59
+                rgba[:, :, 3] = crop_alpha
+
+                img = Image.fromarray(rgba, mode="RGBA")
+                max_side = 96
+                if max(cw, ch) > max_side:
+                    img.thumbnail((max_side, max_side), Image.Resampling.LANCZOS)
+
+                buf = io.BytesIO()
+                img.save(buf, format="PNG", optimize=True)
+                b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+                glyph_previews[cell.char] = {
+                    "data_url": f"data:image/png;base64,{b64}",
+                    "width_em": round((x1 - x0 + 1) * em_per_px, 2),
+                    "height_em": round((y1 - y0 + 1) * em_per_px, 2),
+                    "ascent_em": round((baseline_px - y0) * em_per_px, 2),
+                }
+
+    return {
+        "session_token": session_token,
+        "units_per_em": UNITS_PER_EM,
+        "default_side_bearing": DEFAULT_SIDE_BEARING,
+        "glyphs": glyph_previews,
+    }
 
 
 @router.get("/{session_token}/preview.woff2")

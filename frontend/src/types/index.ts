@@ -128,3 +128,17 @@ export interface FontBuildJobResponse {
   error: string | null;
   artifacts: FontBuildArtifacts | null;
 }
+
+export interface GlyphPreviewItem {
+  data_url: string;
+  width_em: number;
+  height_em: number;
+  ascent_em: number;
+}
+
+export interface GlyphPreviewResponse {
+  session_token: string;
+  units_per_em: number;
+  default_side_bearing: number;
+  glyphs: Record<string, GlyphPreviewItem>;
+}

@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: geulssedam-api
+    runtime: docker
+    plan: free
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: TASK_BACKEND
+        value: background
+      - key: STORAGE_DIR
+        value: /tmp/geulssedam-storage
+      - key: RETENTION_DAYS
+        value: "7"
+      - key: MAX_UPLOAD_MB
+        value: "50"
+      - key: CORS_ORIGINS
+        value: https://ilegood.github.io,http://localhost:5173

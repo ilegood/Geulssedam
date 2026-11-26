@@ -26,15 +26,17 @@ from app.core.charsets import PagePlan, build_page_plans, get_preset
 from app.core.template_spec import DEFAULT_TEMPLATE_SPEC, TemplateSpec
 
 # 가이드 레이어 색상 (RGBA)
-COLOR_GRID_BORDER = (160, 174, 192, 190)
+COLOR_GRID_BORDER = (148, 163, 184, 210)
 COLOR_SAFE_MARGIN = (203, 213, 225, 110)
-COLOR_ASCENDER = (147, 197, 253, 150)
-COLOR_X_HEIGHT = (96, 165, 250, 165)
-COLOR_BASELINE = (239, 68, 68, 195)
-COLOR_DESCENDER = (147, 197, 253, 150)
-COLOR_HINT_CHAR = (148, 163, 184, 95)
-COLOR_LABEL_TEXT = (71, 85, 105, 190)
-COLOR_HEADER_MARK = (30, 41, 59, 175)
+COLOR_X_BAND = (239, 246, 255, 75)
+COLOR_CENTER_AXIS = (203, 213, 225, 115)
+COLOR_ASCENDER = (147, 197, 253, 160)
+COLOR_X_HEIGHT = (59, 130, 246, 175)
+COLOR_BASELINE = (239, 68, 68, 220)
+COLOR_DESCENDER = (147, 197, 253, 160)
+COLOR_HINT_CHAR = (148, 163, 184, 105)
+COLOR_LABEL_TEXT = (71, 85, 105, 210)
+COLOR_HEADER_MARK = (30, 41, 59, 185)
 
 # 한글 지원 시스템 폰트 후보 경로 (Windows / Linux / macOS)
 CANDIDATE_FONT_PATHS: tuple[str, ...] = (
@@ -170,17 +172,20 @@ def render_guide_png(
     output_path: Path,
     font_path: Path | None = None,
 ) -> Path:
-    """칸 경계, 가이드선, 연한 정답 글자 힌트가 그려진 별도 가이드 레이어 PNG를 생성합니다."""
+    """칸 경계, 가이드선, 베이스라인 정렬 정답 글자 힌트가 그려진 가이드 레이어 PNG를 생성합니다."""
     cell = spec.cell_size_px
     img = Image.new("RGBA", (spec.page_width_px, spec.page_height_px), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
+    draw = ImageDraw.Draw(img, "RGBA")
 
-    hint_font = _load_pil_font(font_path, max(16, int(cell * 0.46)))
-    label_font = _load_pil_font(font_path, max(10, int(cell * 0.055)))
+    # 힌트 글자 크기를 베이스라인·x-height·descender 규격에 맞게 설정 (512px 기준 ~307px)
+    hint_font = _load_pil_font(font_path, max(16, int(cell * 0.60)))
+    label_font = _load_pil_font(font_path, max(10, int(cell * 0.058)))
     mark_font = _load_pil_font(font_path, max(12, int(cell * 0.045)))
+    supports_baseline_anchor = isinstance(hint_font, ImageFont.FreeTypeFont)
 
     border_w = max(1, cell // 256)
     line_w = max(1, cell // 256)
+    baseline_w = max(2, cell // 170)
     dash = max(4, cell // 40)
     gap = max(3, cell // 60)
 
@@ -192,30 +197,44 @@ def render_guide_png(
         x1 = x0 + cell - 1
         y1 = y0 + cell - 1
 
-        # 칸 외곽선
-        draw.rectangle([x0, y0, x1, y1], outline=COLOR_GRID_BORDER, width=border_w)
-
-        # 안전 여백 박스
         margin = int(cell * spec.safe_margin_ratio)
+        asc_y = y0 + int(cell * spec.ascender_ratio)
+        xh_y = y0 + int(cell * spec.x_height_ratio)
+        base_y = y0 + int(cell * spec.baseline_ratio)
+        desc_y = y0 + int(cell * spec.descender_ratio)
+        mid_x = x0 + cell // 2
+
+        # 소문자 주 영역(x-height ~ baseline) 연한 음영 밴드 (노트 줄맞춤 효과)
+        draw.rectangle(
+            [x0 + margin, xh_y, x1 - margin, base_y],
+            fill=COLOR_X_BAND,
+        )
+
+        # 칸 외곽선 & 안전 여백 박스
+        draw.rectangle([x0, y0, x1, y1], outline=COLOR_GRID_BORDER, width=border_w)
         draw.rectangle(
             [x0 + margin, y0 + margin, x1 - margin, y1 - margin],
             outline=COLOR_SAFE_MARGIN,
             width=1,
         )
 
-        # 타이포그래피 가이드선 (ascender / x-height / baseline / descender)
-        asc_y = y0 + int(cell * spec.ascender_ratio)
-        xh_y = y0 + int(cell * spec.x_height_ratio)
-        base_y = y0 + int(cell * spec.baseline_ratio)
-        desc_y = y0 + int(cell * spec.descender_ratio)
+        # 세로 중앙 보조 점선 (좌우 중심 맞춤용)
+        _draw_dashed_line(
+            draw, mid_x, asc_y, mid_x, desc_y, COLOR_CENTER_AXIS, 1, dash, gap
+        )
 
+        # 타이포그래피 가이드선 (ascender / x-height / baseline / descender)
         _draw_dashed_line(
             draw, x0 + margin, asc_y, x1 - margin, asc_y, COLOR_ASCENDER, line_w, dash, gap
         )
         _draw_dashed_line(
             draw, x0 + margin, xh_y, x1 - margin, xh_y, COLOR_X_HEIGHT, line_w, dash, gap
         )
-        draw.line([(x0 + margin, base_y), (x1 - margin, base_y)], fill=COLOR_BASELINE, width=line_w)
+        draw.line(
+            [(x0 + margin, base_y), (x1 - margin, base_y)],
+            fill=COLOR_BASELINE,
+            width=baseline_w,
+        )
         _draw_dashed_line(
             draw, x0 + margin, desc_y, x1 - margin, desc_y, COLOR_DESCENDER, line_w, dash, gap
         )
@@ -231,13 +250,21 @@ def render_guide_png(
                 font=label_font,
             )
 
-            # 중앙 연한 정답 글자 힌트 (베이스라인 근방 중앙 정렬)
-            bbox = draw.textbbox((0, 0), char, font=hint_font)
-            text_w = bbox[2] - bbox[0]
-            text_h = bbox[3] - bbox[1]
-            text_x = x0 + (cell - text_w) // 2 - bbox[0]
-            text_y = y0 + int(cell * 0.50) - text_h // 2 - bbox[1]
-            draw.text((text_x, text_y), char, fill=COLOR_HINT_CHAR, font=hint_font)
+            # 정답 글자 힌트를 빨간 베이스라인(base_y)에 정확히 정렬해 렌더링
+            if supports_baseline_anchor:
+                draw.text(
+                    (mid_x, base_y),
+                    char,
+                    fill=COLOR_HINT_CHAR,
+                    font=hint_font,
+                    anchor="ms",
+                )
+            else:
+                bbox = draw.textbbox((0, 0), char, font=hint_font)
+                text_w = bbox[2] - bbox[0]
+                text_x = x0 + (cell - text_w) // 2 - bbox[0]
+                text_y = base_y - bbox[3]
+                draw.text((text_x, text_y), char, fill=COLOR_HINT_CHAR, font=hint_font)
 
     # 페이지 버전 및 번호 식별 워터마크 (좌하단 안전 여백 내)
     page_mark = (
@@ -316,23 +343,37 @@ def render_template_pdf(
             y_top = grid_top - row * cell_pt
             y_bottom = y_top - cell_pt
 
+            # 소문자 주 영역(x-height ~ baseline) 연한 음영 밴드
+            inner_pad = cell_pt * spec.safe_margin_ratio
+            base_y = y_top - cell_pt * spec.baseline_ratio
+            xh_y = y_top - cell_pt * spec.x_height_ratio
+            desc_y = y_top - cell_pt * spec.descender_ratio
+
+            pdf.setFillColor(colors.HexColor("#eff6ff"))
+            pdf.rect(
+                x0 + inner_pad,
+                base_y,
+                cell_pt - 2 * inner_pad,
+                xh_y - base_y,
+                stroke=0,
+                fill=1,
+            )
+
             # 칸 외곽선
             pdf.setStrokeColor(colors.HexColor("#94a3b8"))
             pdf.setLineWidth(0.5)
             pdf.rect(x0, y_bottom, cell_pt, cell_pt, stroke=1, fill=0)
 
-            # 베이스라인(빨간 실선) & x-height(파란 점선)
-            inner_pad = cell_pt * spec.safe_margin_ratio
-            base_y = y_top - cell_pt * spec.baseline_ratio
-            xh_y = y_top - cell_pt * spec.x_height_ratio
-
-            pdf.setStrokeColor(colors.HexColor("#fca5a5"))
-            pdf.setLineWidth(0.4)
+            # 베이스라인(빨간 실선), x-height(파란 점선), descender(연파랑 점선)
+            pdf.setStrokeColor(colors.HexColor("#f87171"))
+            pdf.setLineWidth(0.6)
             pdf.line(x0 + inner_pad, base_y, x0 + cell_pt - inner_pad, base_y)
 
-            pdf.setStrokeColor(colors.HexColor("#bfdbfe"))
+            pdf.setStrokeColor(colors.HexColor("#93c5fd"))
+            pdf.setLineWidth(0.4)
             pdf.setDash(2, 2)
             pdf.line(x0 + inner_pad, xh_y, x0 + cell_pt - inner_pad, xh_y)
+            pdf.line(x0 + inner_pad, desc_y, x0 + cell_pt - inner_pad, desc_y)
             pdf.setDash()
 
             if idx < len(page.chars):
@@ -340,12 +381,12 @@ def render_template_pdf(
                 # 좌상단 작은 라벨
                 pdf.setFillColor(colors.HexColor("#64748b"))
                 pdf.setFont(font_name, 5.5)
-                pdf.drawString(x0 + 1.5, y_top - 6.5, f"{idx + 1:02d}")
+                pdf.drawString(x0 + 1.5, y_top - 6.5, f"{idx + 1:02d} {char}")
 
-                # 중앙 연한 힌트 글자
+                # 베이스라인(base_y)에 정확히 맞춘 연한 힌트 글자
                 pdf.setFillColor(colors.HexColor("#cbd5e1"))
-                pdf.setFont(font_name, cell_pt * 0.48)
-                pdf.drawCentredString(x0 + cell_pt / 2, base_y + cell_pt * 0.06, char)
+                pdf.setFont(font_name, cell_pt * 0.58)
+                pdf.drawCentredString(x0 + cell_pt / 2, base_y, char)
 
         # 하단 푸터
         pdf.setFillColor(colors.HexColor("#64748b"))

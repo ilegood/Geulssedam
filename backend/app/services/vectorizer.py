@@ -197,34 +197,60 @@ def _vectorize_with_potrace(binary_mask: np.ndarray) -> list[VectorPath]:
     return _parse_svg_polygon_paths(svg_text, height=height)
 
 
+def _clean_binary_mask(binary_mask: np.ndarray) -> np.ndarray:
+    """질감 브러시로 생긴 미세 핀홀·잡티를 제거해 윤곽선 깨짐을 방지합니다."""
+    height, width = binary_mask.shape
+    cell_dim = min(height, width)
+    if cell_dim < 128:
+        return binary_mask
+
+    # 칸 크기 비례 작은 타원 커널(512px 기준 3×3)로 1~2px 브러시 핀홀 닫기
+    k_size = max(3, (cell_dim // 180) * 2 + 1)
+    k_size = min(k_size, 5)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k_size, k_size))
+    return cv2.morphologyEx(binary_mask, cv2.MORPH_CLOSE, kernel)
+
+
 def _vectorize_with_opencv(
     binary_mask: np.ndarray,
-    simplify_ratio: float = 0.004,
+    simplify_ratio: float = 0.002,
 ) -> list[VectorPath]:
     """OpenCV findContours + approxPolyDP로 윤곽선 추출 및 곡선 단순화를 수행합니다."""
+    height, width = binary_mask.shape
+    cell_dim = min(height, width)
+    cell_area = float(height * width)
+
+    # 질감 브러시 핀홀 제거 후 윤곽선 추출
+    cleaned_mask = _clean_binary_mask(binary_mask)
+
     contours_raw, hierarchy = cv2.findContours(
-        binary_mask,
+        cleaned_mask,
         cv2.RETR_CCOMP,
         cv2.CHAIN_APPROX_NONE,
     )
     if hierarchy is None or len(contours_raw) == 0:
         return []
 
+    # 칸 크기에 비례한 최소 면적 (512px 기준 외곽선 ~39px², 내부 구멍 ~105px²)
+    min_outer_area = max(4.0, cell_area * 0.00015)
+    min_hole_area = max(8.0, cell_area * 0.0004)
+    max_epsilon = max(1.0, cell_dim * 0.0035)
+
     hierarchy_arr = hierarchy[0]
     results: list[VectorPath] = []
     for idx, cnt in enumerate(contours_raw):
+        # hierarchy[idx][3] != -1 이면 구멍(내부 윤곽선)
+        is_hole = int(hierarchy_arr[idx][3]) != -1
         area = cv2.contourArea(cnt)
-        if area < 4.0:
+        if area < (min_hole_area if is_hole else min_outer_area):
             continue
 
         peri = cv2.arcLength(cnt, True)
-        epsilon = max(1.0, peri * simplify_ratio)
+        epsilon = min(max_epsilon, max(0.8, peri * simplify_ratio))
         approx = cv2.approxPolyDP(cnt, epsilon, True)
         if len(approx) < 3:
             continue
 
-        # hierarchy[idx][3] != -1 이면 구멍(내부 윤곽선)
-        is_hole = int(hierarchy_arr[idx][3]) != -1
         pts = tuple((float(p[0][0]), float(p[0][1])) for p in approx)
         results.append(VectorPath(points=pts, is_hole=is_hole))
 

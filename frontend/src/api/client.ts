@@ -1,6 +1,7 @@
 import type {
   FontBuildJobResponse,
   FontBuildRequest,
+  GlyphPreviewResponse,
   HealthResponse,
   PresetListResponse,
   SessionInfoResponse,
@@ -138,4 +139,16 @@ export async function fetchFontBuildJob(jobId: string): Promise<FontBuildJobResp
     throw new Error(err?.detail || '작업 상태 조회에 실패했습니다.');
   }
   return (await response.json()) as FontBuildJobResponse;
+}
+
+/** 폰트 설정 단계 실시간 미리보기용 글리프 썸네일과 치수를 조회합니다. */
+export async function fetchGlyphPreviews(sessionToken: string): Promise<GlyphPreviewResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/fonts/${encodeURIComponent(sessionToken)}/glyph-previews`,
+  );
+  if (!response.ok) {
+    const err = (await response.json().catch(() => null)) as { detail?: string } | null;
+    throw new Error(err?.detail || '글리프 미리보기를 불러오지 못했습니다.');
+  }
+  return (await response.json()) as GlyphPreviewResponse;
 }

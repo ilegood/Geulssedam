@@ -687,6 +687,88 @@ body {
   background: var(--surface);
 }
 
+.live-preview-box {
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.live-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+
+.live-preview-input {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #ffffff;
+  font-size: 0.94rem;
+  color: var(--text);
+  margin-bottom: 12px;
+}
+
+.live-preview-stage {
+  position: relative;
+  overflow-x: auto;
+  padding: 12px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+}
+
+.live-preview-line {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
+  min-width: 100%;
+  white-space: nowrap;
+}
+
+.live-preview-baseline {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  border-top: 1px dashed rgba(239, 68, 68, 0.45);
+  pointer-events: none;
+}
+
+.live-glyph-slot {
+  position: relative;
+  display: inline-block;
+  flex: 0 0 auto;
+}
+
+.live-glyph-img {
+  position: absolute;
+  display: block;
+  user-select: none;
+  pointer-events: none;
+}
+
+.live-glyph-missing {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  min-width: 28px;
+  height: 36px;
+  margin: 0 3px;
+  padding: 0 6px;
+  border-radius: 6px;
+  border: 1px dashed #cbd5e1;
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 720px) {
   .stepper {
     grid-template-columns: repeat(2, 1fr);
