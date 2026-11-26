@@ -3,6 +3,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.fonts import router as fonts_router
+from app.api.templates import router as templates_router
+from app.api.uploads import router as uploads_router
 from app.core.config import settings
 from app.core.template_spec import DEFAULT_TEMPLATE_SPEC
 
@@ -19,6 +22,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(templates_router)
+app.include_router(uploads_router)
+app.include_router(fonts_router)
 
 
 @app.get("/health", tags=["system"])
