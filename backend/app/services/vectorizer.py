@@ -161,18 +161,49 @@ def _parse_svg_polygon_paths(svg_text: str, height: int) -> list[VectorPath]:
         if len(current) >= 3:
             contours.append(VectorPath(points=tuple(current)))
 
-    return contours
+    return _classify_contour_holes(contours)
+
+
+def _classify_contour_holes(contours: list[VectorPath]) -> list[VectorPath]:
+    """윤곽선 포함 깊이(짝수=외곽선, 홀수=내부 구멍)로 is_hole을 정확히 판별합니다."""
+    if len(contours) <= 1:
+        return contours
+
+    polys = [
+        np.array(c.points, dtype=np.float32).reshape((-1, 1, 2))
+        for c in contours
+    ]
+    areas = [cv2.contourArea(p) for p in polys]
+
+    classified: list[VectorPath] = []
+    for i, contour in enumerate(contours):
+        # 다각형 대표 점(첫 꼭짓점)이 더 큰 다른 윤곽선 내부에 몇 겹 포함되는지 계산
+        test_pt = (float(contour.points[0][0]), float(contour.points[0][1]))
+        depth = 0
+        for j, other_poly in enumerate(polys):
+            if i == j or areas[j] <= areas[i]:
+                continue
+            if cv2.pointPolygonTest(other_poly, test_pt, False) > 0:
+                depth += 1
+        classified.append(VectorPath(points=contour.points, is_hole=(depth % 2 == 1)))
+
+    return classified
 
 
 def _vectorize_with_potrace(binary_mask: np.ndarray) -> list[VectorPath]:
     """potrace CLI로 이진 마스크를 벡터화합니다."""
-    height, width = binary_mask.shape
+    cleaned_mask = _clean_binary_mask(binary_mask)
+    height, width = cleaned_mask.shape
+    cell_area = float(height * width)
+    min_outer_area = max(4.0, cell_area * 0.00015)
+    min_hole_area = max(8.0, cell_area * 0.0004)
+
     # potrace는 PBM(P4 또는 P1) 입력을 지원: 1=전경(검정), 0=배경(흰색)
     with tempfile.TemporaryDirectory() as tmpdir:
         pbm_path = Path(tmpdir) / "glyph.pbm"
         svg_path = Path(tmpdir) / "glyph.svg"
 
-        packed = np.packbits(binary_mask, axis=1)
+        packed = np.packbits(cleaned_mask, axis=1)
         header = f"P4\n{width} {height}\n".encode("ascii")
         pbm_path.write_bytes(header + packed.tobytes())
 
@@ -183,7 +214,7 @@ def _vectorize_with_potrace(binary_mask: np.ndarray) -> list[VectorPath]:
                 "-s",
                 "--flat",
                 "--turdsize",
-                "4",
+                "12",
                 "--opttolerance",
                 "0.4",
                 "-o",
@@ -194,7 +225,15 @@ def _vectorize_with_potrace(binary_mask: np.ndarray) -> list[VectorPath]:
         )
         svg_text = svg_path.read_text(encoding="utf-8")
 
-    return _parse_svg_polygon_paths(svg_text, height=height)
+    paths = _parse_svg_polygon_paths(svg_text, height=height)
+    filtered: list[VectorPath] = []
+    for path in paths:
+        poly = np.array(path.points, dtype=np.float32).reshape((-1, 1, 2))
+        area = cv2.contourArea(poly)
+        if area < (min_hole_area if path.is_hole else min_outer_area):
+            continue
+        filtered.append(path)
+    return filtered
 
 
 def _clean_binary_mask(binary_mask: np.ndarray) -> np.ndarray:

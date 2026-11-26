@@ -19,7 +19,7 @@ from app.services.glyph_normalizer import (
     merge_glyph_layers,
     normalize_vectorized_glyph,
 )
-from app.services.vectorizer import vectorize_alpha_mask
+from app.services.vectorizer import _parse_svg_polygon_paths, vectorize_alpha_mask
 
 client = TestClient(app)
 
@@ -51,6 +51,21 @@ def _draw_sample_template_png(
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return buf.getvalue()
+
+
+def test_potrace_svg_hole_classification_preserves_donut_hole() -> None:
+    """potrace SVG 파싱 시 도넛(O, ㅇ 등)의 내부 구멍이 is_hole=True로 판별되는지 검증합니다."""
+    donut_svg = (
+        '<?xml version="1.0" standalone="no"?>'
+        '<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512">'
+        '<g transform="translate(0,512) scale(0.1,-0.1)">'
+        '<path d="M1000 1000 L4000 1000 L4000 4000 L1000 4000 Z '
+        'M1800 1800 L1800 3200 L3200 3200 L3200 1800 Z"/>'
+        "</g></svg>"
+    )
+    paths = _parse_svg_polygon_paths(donut_svg, height=512)
+    assert len(paths) == 2
+    assert [p.is_hole for p in paths] == [False, True]
 
 
 def test_split_vectorize_normalize_and_build_ttf_woff2(tmp_path: Path) -> None:
