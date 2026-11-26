@@ -1,0 +1,67 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      TASK_BACKEND: ${TASK_BACKEND:-rq}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      STORAGE_DIR: /app/storage
+      RETENTION_DAYS: ${RETENTION_DAYS:-7}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
+      CORS_ORIGINS: http://localhost:5173
+    volumes:
+      - ./backend:/app
+      - ./storage:/app/storage
+      - ./shared:/app/shared
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      TASK_BACKEND: rq
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      STORAGE_DIR: /app/storage
+      RETENTION_DAYS: ${RETENTION_DAYS:-7}
+    volumes:
+      - ./backend:/app
+      - ./storage:/app/storage
+      - ./shared:/app/shared
+    depends_on:
+      redis:
+        condition: service_healthy
+    command: rq worker fontbuilder --url redis://redis:6379/0
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "${FRONTEND_PORT:-5173}:5173"
+    environment:
+      VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    command: npm run dev -- --host 0.0.0.0 --port 5173
