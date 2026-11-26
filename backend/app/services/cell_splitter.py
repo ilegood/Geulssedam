@@ -40,9 +40,10 @@ def split_page_into_cells(
     page_plan = pages[page_number - 1]
 
     with Image.open(image_path) as img:
-        rgba = np.array(img.convert("RGBA"), dtype=np.uint8)
-
-    alpha_full = rgba[:, :, 3]
+        if "A" in img.getbands():
+            alpha_full = np.array(img.getchannel("A"), dtype=np.uint8)
+        else:
+            alpha_full = np.array(img.convert("RGBA").getchannel("A"), dtype=np.uint8)
     height, width = alpha_full.shape
     cell_h = height / spec.rows
     cell_w = width / spec.cols

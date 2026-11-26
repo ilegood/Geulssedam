@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     max_upload_mb: int = 50
 
     # CORS 허용 오리진 (쉼표 구분)
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = "http://localhost:5173,https://ilegood.github.io"
 
     model_config = SettingsConfigDict(
         env_file=".env",

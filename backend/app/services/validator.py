@@ -32,7 +32,7 @@ from app.schemas.validation import (
 
 @dataclass(frozen=True)
 class _LoadedImage:
-    rgba: np.ndarray
+    alpha: np.ndarray
     width: int
     height: int
     image_format: str
@@ -80,10 +80,11 @@ def _load_image_bytes(image_bytes: bytes) -> tuple[_LoadedImage | None, FileVali
                     issues=issues,
                 )
 
-            rgba = np.array(img.convert("RGBA"), dtype=np.uint8)
+            # 알파 채널만 추출해 대용량 PNG(5120×5120) 처리 시 메모리 사용량을 1/4로 절감
+            alpha = np.array(img.getchannel("A"), dtype=np.uint8)
             return (
                 _LoadedImage(
-                    rgba=rgba,
+                    alpha=alpha,
                     width=width,
                     height=height,
                     image_format=img_format,
@@ -163,7 +164,7 @@ def validate_file_level(
         )
 
     # 전체 배경이 불투명하게 칠해져 있는지 검사
-    alpha = loaded.rgba[:, :, 3]
+    alpha = loaded.alpha
     opaque_page_ratio = float(np.mean(alpha >= thresholds.alpha_foreground_threshold))
     if opaque_page_ratio >= thresholds.opaque_background_ratio:
         issues.append(
@@ -421,7 +422,7 @@ def validate_uploaded_page(
         )
 
     # 파일 단위 검증을 통과한 경우 10×10 칸으로 분할하여 칸별 진단 수행
-    alpha_full = loaded.rgba[:, :, 3]
+    alpha_full = loaded.alpha
     cell_h = loaded.height / spec.rows
     cell_w = loaded.width / spec.cols
 

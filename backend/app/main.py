@@ -1,7 +1,8 @@
 """FastAPI 애플리케이션 엔트리포인트."""
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.api.fonts import router as fonts_router
 from app.api.templates import router as templates_router
@@ -26,6 +27,17 @@ app.add_middleware(
 app.include_router(templates_router)
 app.include_router(uploads_router)
 app.include_router(fonts_router)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """예상치 못한 서버 오류 시에도 CORS 헤더가 유지되는 일관된 JSON 오류를 반환합니다."""
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": f"서버 처리 중 오류가 발생했습니다: {type(exc).__name__}",
+        },
+    )
 
 
 @app.get("/health", tags=["system"])
