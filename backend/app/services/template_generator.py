@@ -311,6 +311,18 @@ def render_template_pdf(
     grid_top = grid_bottom + grid_size
 
     for page in pages:
+        from app.services.jamo_template_generator import (
+            draw_jamo_pdf_page,
+            get_jamo_page_plan_for_group,
+        )
+
+        jamo_page = get_jamo_page_plan_for_group(
+            page.group_id, page.page_number, page.total_pages
+        )
+        if jamo_page is not None:
+            draw_jamo_pdf_page(pdf, jamo_page, spec, font_name)
+            continue
+
         # 상단 헤더 영역
         pdf.setFillColor(colors.HexColor("#1e293b"))
         pdf.setFont(font_name, 14)
@@ -438,7 +450,18 @@ def generate_templates(
 
         if "guide" in selected_formats:
             guide_path = output_dir / f"page_{page.page_number:02d}_guide.png"
-            render_guide_png(page, spec, guide_path, font_path=font_path)
+            from app.services.jamo_template_generator import (
+                get_jamo_page_plan_for_group,
+                render_jamo_guide_png,
+            )
+
+            jamo_page = get_jamo_page_plan_for_group(
+                page.group_id, page.page_number, page.total_pages
+            )
+            if jamo_page is not None:
+                render_jamo_guide_png(jamo_page, spec, guide_path, font_path=font_path)
+            else:
+                render_guide_png(page, spec, guide_path, font_path=font_path)
             guide_paths.append(guide_path)
 
         page_metas.append(build_page_metadata(page, spec))

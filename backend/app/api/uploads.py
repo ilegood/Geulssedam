@@ -8,7 +8,7 @@ from typing import Annotated
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import JSONResponse
 
-from app.core.charsets import TEMPLATE_PRESETS, build_page_plans, get_preset
+from app.core.charsets import ACTIVE_PRESET_IDS, TEMPLATE_PRESETS, build_page_plans, get_preset
 from app.core.config import settings
 from app.core.template_spec import DEFAULT_TEMPLATE_SPEC
 from app.schemas.validation import (
@@ -26,7 +26,8 @@ router = APIRouter(prefix="/api", tags=["uploads"])
 def list_template_presets() -> dict[str, object]:
     """선택 가능한 문자 범위 프리셋 목록과 페이지 수·글자 수를 반환합니다."""
     presets = []
-    for preset in TEMPLATE_PRESETS.values():
+    for preset_id in ACTIVE_PRESET_IDS:
+        preset = TEMPLATE_PRESETS[preset_id]
         pages = build_page_plans(preset.id, cells_per_page=DEFAULT_TEMPLATE_SPEC.cells_per_page)
         presets.append(
             {

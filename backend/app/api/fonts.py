@@ -13,12 +13,14 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, status
 from fastapi.responses import FileResponse
 from PIL import Image
 
+from app.core.charsets import build_page_plans
 from app.core.config import settings
 from app.core.template_spec import DEFAULT_TEMPLATE_SPEC
 from app.core.validation_config import DEFAULT_VALIDATION_THRESHOLDS
 from app.schemas.font_build import FontBuildJobResponse, FontBuildRequest
 from app.services.cell_splitter import split_page_into_cells
 from app.services.glyph_normalizer import DEFAULT_SIDE_BEARING, UNITS_PER_EM
+from app.services.jamo_template_generator import JAMO_POSITIONAL_GROUP_IDS
 from app.services.session_store import get_session
 from app.workers.build_jobs import create_build_job, get_build_job, run_font_build_job
 
@@ -126,12 +128,16 @@ def get_glyph_previews(session_token: str) -> dict[str, object]:
     threshold = DEFAULT_VALIDATION_THRESHOLDS.alpha_foreground_threshold
 
     glyph_previews: dict[str, dict[str, object]] = {}
+    all_pages = build_page_plans(session.preset_id, cells_per_page=spec.cells_per_page)
     if uploads_dir.is_dir():
         for page_file in sorted(uploads_dir.glob("page_*.png")):
             stem_parts = page_file.stem.split("_")
             if len(stem_parts) != 2 or not stem_parts[1].isdigit():
                 continue
             page_num = int(stem_parts[1])
+            if 1 <= page_num <= len(all_pages):
+                if all_pages[page_num - 1].group_id in JAMO_POSITIONAL_GROUP_IDS:
+                    continue
             try:
                 cells = split_page_into_cells(
                     image_path=page_file,

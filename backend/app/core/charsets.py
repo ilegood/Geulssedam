@@ -13,6 +13,21 @@ LATIN_LOWER: str = "abcdefghijklmnopqrstuvwxyz"
 DIGITS: str = "0123456789"
 BASIC_SYMBOLS: str = ".,!?'\"-():;/@#&*+=~_[]{}<>%$^`"
 
+# 한글 기본 단독 자모 40자 (자음 19자 + 모음 21자: ㅋㅋㅋ, ㅎㅎ, ㅠㅠ, ㄱㄴㄷ, ㅏㅑ 등)
+HANGUL_BASIC_JAMO: str = (
+    "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"
+    "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ"
+)
+
+# 6-2-2벌 조합용 자모 시퀀스 (페이지별 배치용)
+_JAMO_CHO_19: str = "ㄱㄲㄴㄷㄸㄹㅁㅂㅃㅅㅆㅇㅈㅉㅊㅋㅌㅍㅎ"
+_JAMO_JUNG_21: str = "ㅏㅐㅑㅒㅓㅔㅕㅖㅗㅘㅙㅚㅛㅜㅝㅞㅟㅠㅡㅢㅣ"
+_JAMO_JONG_27: str = "ㄱㄲㄳㄴㄵㄶㄷㄹㄺㄻㄼㄽㄾㄿㅀㅁㅂㅄㅅㅆㅇㅈㅊㅋㅌㅍㅎ"
+
+HANGUL_JAMO_CHO13: str = _JAMO_CHO_19 * 3  # 57칸 (초성 1~3벌)
+HANGUL_JAMO_CHO46: str = _JAMO_CHO_19 * 3  # 57칸 (초성 4~6벌)
+HANGUL_JAMO_JUNG_JONG: str = (_JAMO_JUNG_21 * 2) + (_JAMO_JONG_27 * 2)  # 96칸 (중성 2벌 + 종성 2벌)
+
 # 한국어 일상 문장·문서에서 빈도가 높은 대표 한글 음절 200자 (가나다순, 중복 없음)
 HANGUL_COMMON_200: str = (
     "가간갈감강개거건것게경고과구국그글금기길"
@@ -66,48 +81,106 @@ class PagePlan:
     chars: tuple[str, ...]
 
 
-# 기본 문자 그룹 레지스트리 (향후 hangul_2350 등 추가 가능)
+# 기본 문자 그룹 레지스트리
 CHARSET_GROUPS: dict[str, CharsetGroup] = {
     "latin_basic": CharsetGroup(
         id="latin_basic",
         name="영문·숫자·기본 특수문자",
         description="영문 대소문자 52자, 숫자 10자, 기본 특수문자 30자 (총 92자)",
         chars=tuple(LATIN_UPPER + LATIN_LOWER + DIGITS + BASIC_SYMBOLS),
-        stage="mvp",
+        stage="active",
+    ),
+    "hangul_jamo_basic": CharsetGroup(
+        id="hangul_jamo_basic",
+        name="한글 기본 단독 자모 (ㄱ~ㅎ, ㅏ~ㅣ)",
+        description="단독 자음 19자 + 모음 21자 = 40자 (ㅋㅋㅋ, ㅠㅠ, ㄱㄴㄷ, ㅏㅑ 등)",
+        chars=tuple(HANGUL_BASIC_JAMO),
+        stage="active",
+    ),
+    "hangul_jamo_cho13": CharsetGroup(
+        id="hangul_jamo_cho13",
+        name="한글 초성 1~3벌 (받침 없는 글자용)",
+        description="받침 없는 세로/가로/복합모음 조합용 초성 57칸",
+        chars=tuple(HANGUL_JAMO_CHO13),
+        stage="active",
+    ),
+    "hangul_jamo_cho46": CharsetGroup(
+        id="hangul_jamo_cho46",
+        name="한글 초성 4~6벌 (받침 있는 글자용)",
+        description="받침 있는 세로/가로/복합모음 조합용 초성 57칸",
+        chars=tuple(HANGUL_JAMO_CHO46),
+        stage="active",
+    ),
+    "hangul_jamo_jung_jong": CharsetGroup(
+        id="hangul_jamo_jung_jong",
+        name="한글 중성 1~2벌 + 종성 1~2벌",
+        description="받침 유무별 중성 42칸 + 모음 유형별 종성 54칸 (총 96칸)",
+        chars=tuple(HANGUL_JAMO_JUNG_JONG),
+        stage="active",
     ),
     "hangul_200": CharsetGroup(
         id="hangul_200",
         name="한글 자주 쓰는 200자",
         description="일상 문장과 문서에서 자주 쓰이는 한글 음절 200자",
         chars=tuple(HANGUL_COMMON_200),
-        stage="mvp",
+        stage="legacy",
     ),
 }
 
-# 기본 템플릿 프리셋 레지스트리
+# 기본 템플릿 프리셋 레지스트리 (UI 노출 메인 3종: active)
 TEMPLATE_PRESETS: dict[str, TemplatePreset] = {
     "latin_basic": TemplatePreset(
         id="latin_basic",
-        name="영문·숫자·특수문자 기본",
+        name="영문·숫자·특수문자",
         description="영문 대소문자, 숫자, 기본 특수문자 92자 (1페이지)",
         group_ids=("latin_basic",),
-        stage="mvp",
+        stage="active",
+    ),
+    "hangul_jamo": TemplatePreset(
+        id="hangul_jamo",
+        name="한글 조합형 (기본 자모 + 6-2-2벌)",
+        description="기본 단독 자모 40자(ㄱ~ㅎ, ㅏ~ㅣ) + 6-2-2벌 210칸 = 총 250칸 (4페이지)",
+        group_ids=(
+            "hangul_jamo_basic",
+            "hangul_jamo_cho13",
+            "hangul_jamo_cho46",
+            "hangul_jamo_jung_jong",
+        ),
+        stage="active",
+    ),
+    "latin_hangul_jamo": TemplatePreset(
+        id="latin_hangul_jamo",
+        name="영문 + 한글 조합형 전체 세트",
+        description=(
+            "영문·숫자·특수문자(1P) + 한글 기본 자모(1P) + "
+            "한글 조합형 6-2-2벌(3P) = 총 342칸 (5페이지)"
+        ),
+        group_ids=(
+            "latin_basic",
+            "hangul_jamo_basic",
+            "hangul_jamo_cho13",
+            "hangul_jamo_cho46",
+            "hangul_jamo_jung_jong",
+        ),
+        stage="active",
     ),
     "hangul_200": TemplatePreset(
         id="hangul_200",
         name="한글 자주 쓰는 200자",
         description="한글 대표 음절 200자 (2페이지)",
         group_ids=("hangul_200",),
-        stage="mvp",
+        stage="legacy",
     ),
     "mvp": TemplatePreset(
         id="mvp",
         name="MVP 전체 세트 (영문+숫자+특수문자+한글 200자)",
         description="기본 92자(1페이지) + 한글 200자(2페이지) = 총 292자 (3페이지)",
         group_ids=("latin_basic", "hangul_200"),
-        stage="mvp",
+        stage="legacy",
     ),
 }
+
+ACTIVE_PRESET_IDS: tuple[str, ...] = ("latin_basic", "hangul_jamo", "latin_hangul_jamo")
 
 
 def register_charset_group(group: CharsetGroup) -> None:

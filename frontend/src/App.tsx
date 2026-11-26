@@ -25,7 +25,7 @@ function App() {
   const [step, setStep] = useState<StepNumber>(1);
   const [presets, setPresets] = useState<TemplatePreset[]>([]);
   const [templateVersion, setTemplateVersion] = useState<string>('v1');
-  const [selectedPresetId, setSelectedPresetId] = useState<string>('mvp');
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('latin_hangul_jamo');
   const [loadingPresets, setLoadingPresets] = useState<boolean>(true);
   const [globalError, setGlobalError] = useState<string | null>(null);
 

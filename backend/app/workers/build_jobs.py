@@ -28,8 +28,13 @@ from app.services.glyph_normalizer import (
     merge_glyph_layers,
     normalize_vectorized_glyph,
 )
+from app.services.jamo_template_generator import (
+    JAMO_POSITIONAL_GROUP_IDS,
+    compose_hangul_syllables_from_jamo,
+    get_jamo_page_plan_for_group,
+)
 from app.services.session_store import get_session
-from app.services.vectorizer import vectorize_alpha_mask
+from app.services.vectorizer import VectorizedGlyph, vectorize_alpha_mask
 
 
 def _jobs_root(base_dir: Path | None = None) -> Path:
@@ -142,28 +147,50 @@ def run_font_build_job(
             session.preset_id,
             cells_per_page=DEFAULT_TEMPLATE_SPEC.cells_per_page,
         )
-        expected_chars = [ch for page in all_pages for ch in page.chars]
+        expected_chars = [
+            ch
+            for page in all_pages
+            if page.group_id not in JAMO_POSITIONAL_GROUP_IDS
+            for ch in page.chars
+        ]
 
-        extracted_cells = []
+        direct_cells = []
+        jamo_slot_cells: list[tuple[str, object]] = []
         for png_path in uploaded_pngs:
             # 파일명 page_01.png → 페이지 번호 추출
             stem_parts = png_path.stem.split("_")
             page_num = int(stem_parts[1])
+            if page_num < 1 or page_num > len(all_pages):
+                continue
+            page_plan = all_pages[page_num - 1]
             cells = split_page_into_cells(
                 image_path=png_path,
                 preset_id=session.preset_id,
                 page_number=page_num,
                 spec=DEFAULT_TEMPLATE_SPEC,
             )
-            extracted_cells.extend(c for c in cells if not c.is_empty)
 
-        if not extracted_cells:
+            if page_plan.group_id in JAMO_POSITIONAL_GROUP_IDS:
+                jamo_page = get_jamo_page_plan_for_group(
+                    page_plan.group_id, page_plan.page_number, page_plan.total_pages
+                )
+                if jamo_page is not None:
+                    for idx, cell in enumerate(cells):
+                        if not cell.is_empty and idx < len(jamo_page.slots):
+                            jamo_slot_cells.append((jamo_page.slots[idx].slot_id, cell))
+            else:
+                direct_cells.extend(c for c in cells if not c.is_empty)
+
+        if not direct_cells and not jamo_slot_cells:
             raise ValueError("작성된 글자가 없습니다. 최소 1글자 이상 그린 뒤 다시 시도해 주세요.")
 
-        # 2) 벡터화 + em 박스 정규화 (진행률 20% → 80%)
+        # 2) 벡터화 + em 박스 정규화 (진행률 20% → 75%)
         handwritten_glyphs: dict[int, NormalizedGlyph] = {}
-        total = len(extracted_cells)
-        for idx, cell in enumerate(extracted_cells):
+        jamo_vectors: dict[str, VectorizedGlyph] = {}
+        total = len(direct_cells) + len(jamo_slot_cells)
+        processed = 0
+
+        for cell in direct_cells:
             vectorized = vectorize_alpha_mask(cell.alpha)
             normalized = normalize_vectorized_glyph(
                 char=cell.char,
@@ -174,19 +201,50 @@ def run_font_build_job(
             )
             if normalized is not None:
                 handwritten_glyphs[normalized.codepoint] = normalized
-
-            if idx % max(1, total // 10) == 0 or idx == total - 1:
-                pct = 20 + int(((idx + 1) / total) * 60)
+            processed += 1
+            if processed % max(1, total // 10) == 0 or processed == total:
+                pct = 20 + int((processed / total) * 55)
                 _update_job(
                     job_id,
                     "running",
                     pct,
-                    f"글자 윤곽선을 추출하고 정규화하는 중... ({idx + 1}/{total})",
+                    f"글자 윤곽선을 추출하고 정규화하는 중... ({processed}/{total})",
                     base_dir=base_dir,
                 )
 
-        # 향후 3번 혼합형(벌 조합형 레이어) 추가 시 merge_glyph_layers(composed, handwritten)로 병합
-        final_glyphs = merge_glyph_layers(handwritten_glyphs)
+        for slot_id, cell in jamo_slot_cells:
+            vectorized = vectorize_alpha_mask(cell.alpha)
+            if vectorized.contours:
+                jamo_vectors[slot_id] = vectorized
+            processed += 1
+            if processed % max(1, total // 10) == 0 or processed == total:
+                pct = 20 + int((processed / total) * 55)
+                _update_job(
+                    job_id,
+                    "running",
+                    pct,
+                    f"조합용 자모 윤곽선을 추출하는 중... ({processed}/{total})",
+                    base_dir=base_dir,
+                )
+
+        composed_glyphs: dict[int, NormalizedGlyph] = {}
+        if jamo_vectors:
+            _update_job(
+                job_id,
+                "running",
+                78,
+                "한글 자모(6-2-2벌)를 완성형 음절로 조합하는 중...",
+                base_dir=base_dir,
+            )
+            composed_glyphs = compose_hangul_syllables_from_jamo(
+                jamo_vectors=jamo_vectors,
+                spec=DEFAULT_TEMPLATE_SPEC,
+                letter_spacing_delta=request.letter_spacing,
+                scale_factor=request.scale_factor,
+            )
+
+        # 조합형 레이어 위에 직접 그린 글자(영문/숫자/단독 자모 등)를 우선 병합
+        final_glyphs = merge_glyph_layers(composed_glyphs, handwritten_glyphs)
 
         # 3) fontTools로 TTF / WOFF2 / ZIP 조립
         _update_job(

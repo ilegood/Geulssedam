@@ -37,12 +37,12 @@ def _make_sample_page_png(cell_size: int = 256, fill_cells: int = 3) -> bytes:
 
 
 def test_list_template_presets() -> None:
-    """GET /api/templates/presets가 MVP 프리셋 정보를 반환하는지 확인합니다."""
+    """GET /api/templates/presets가 메인 3종 프리셋 정보를 반환하는지 확인합니다."""
     res = client.get("/api/templates/presets")
     assert res.status_code == 200
     body = res.json()
-    preset_ids = {p["id"] for p in body["presets"]}
-    assert {"latin_basic", "hangul_200", "mvp"}.issubset(preset_ids)
+    preset_ids = [p["id"] for p in body["presets"]]
+    assert preset_ids == ["latin_basic", "hangul_jamo", "latin_hangul_jamo"]
 
 
 def test_session_and_upload_lifecycle(tmp_path: Path, monkeypatch) -> None:
